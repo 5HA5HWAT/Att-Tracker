@@ -41,7 +41,7 @@ userRouter.post("/signin",async function(req,res){
     
     const singinSchema=zod.object({
         email: zod.string().email("Invalid email address"),
-        password: zod.string().min(6, "Password must be at least 6 characters long")
+        password: zod.string()
     })
     
     const result = singinSchema.safeParse(req.body)
