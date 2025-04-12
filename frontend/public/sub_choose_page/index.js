@@ -29,3 +29,30 @@ function generateSubjectInputs() {
       container.appendChild(wrapper);
     }
   }
+
+// Handle form submission
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('scheduleForm');
+  
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    // Get all subject inputs
+    const numSubjects = parseInt(document.getElementById('numSubjects').value);
+    const subjects = [];
+    
+    for (let i = 1; i <= numSubjects; i++) {
+      const subjectInput = document.getElementById(`subject${i}`);
+      if (subjectInput && subjectInput.value.trim()) {
+        subjects.push(subjectInput.value.trim());
+      }
+    }
+    
+    // Save subjects to localStorage
+    localStorage.setItem('subjects', JSON.stringify(subjects));
+    localStorage.setItem('scheduleSetUp', 'true');
+    
+    // Redirect to dashboard
+    window.location.href = '../dashboard/dashborad.html';
+  });
+});
