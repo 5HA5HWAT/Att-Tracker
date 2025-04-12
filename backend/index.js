@@ -3,18 +3,20 @@ const path = require("path");
 
 const express = require("express")
 const mongoose = require("mongoose")
-const app=express()
+const app = express()
 app.use(express.json())
 app.use(require('cors')()); 
+
+// Serve static files from the frontend public directory
+app.use(express.static(path.join(__dirname, "../frontend/public")));
 
 const { userRouter } = require("./routes/user");
 
 app.use("/api/v1/user", userRouter);
 
-
-//update the below route(left)
+// Default route - serve the landing page
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend/public/sign_up_page/sign_up_page.html"));
+    res.sendFile(path.join(__dirname, "../frontend/public/landing_page/index.html"));
 });
 
 async function main() {
