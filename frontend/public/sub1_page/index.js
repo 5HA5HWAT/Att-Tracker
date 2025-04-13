@@ -2,9 +2,10 @@
 let subjectData = null;
 let attendanceChart = null;
 
-// Get subject ID from URL
+// Get parameters from URL
 const urlParams = new URLSearchParams(window.location.search);
 const subjectId = urlParams.get('id');
+const subjectName = urlParams.get('name');
 
 // Parse JWT token
 function parseToken(token) {
@@ -20,23 +21,34 @@ function parseToken(token) {
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', async function() {
+    // Show loading state
+    const mainContent = document.querySelector('.container');
+    const loadingSpinner = document.createElement('div');
+    loadingSpinner.className = 'text-center my-5';
+    loadingSpinner.innerHTML = `
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading subject details...</p>
+    `;
+    mainContent.prepend(loadingSpinner);
+    
     // Check for token
     const token = localStorage.getItem('token');
     if (!token) {
-        window.location.href = '../login_page/index.html';
+        showAlert('You need to log in to view this page', 'warning');
+        setTimeout(() => {
+            window.location.href = '../new_signin_signup/index.html';
+        }, 2000);
         return;
     }
     
-    const tokenData = parseToken(token);
-    if (!tokenData || !tokenData.userId) {
-        localStorage.removeItem('token');
-        window.location.href = '../login_page/index.html';
-        return;
-    }
-    
-    // If no subject ID is provided, redirect to subjects page
-    if (!subjectId) {
-        window.location.href = '../subjects_page/index.html';
+    // If no subject ID or name is provided, redirect to dashboard
+    if (!subjectId && !subjectName) {
+        showAlert('No subject specified', 'warning');
+        setTimeout(() => {
+            window.location.href = '../dashboard/dashboard.html';
+        }, 2000);
         return;
     }
     
@@ -44,25 +56,34 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Fetch subject data
         await fetchSubjectData();
         
-        // Initialize components
-        initializeCircularProgress();
-        initializeAttendanceChart('week');
-        loadRecentActivities();
+        // Remove loading spinner
+        loadingSpinner.remove();
         
-        // Set up event listeners
-        document.querySelectorAll('.period-selector .btn').forEach(button => {
-            button.addEventListener('click', function() {
-                const period = this.dataset.period;
-                document.querySelectorAll('.period-selector .btn').forEach(btn => {
-                    btn.classList.remove('active');
+        // Only initialize components if data was loaded successfully
+        if (subjectData) {
+            // Initialize components
+            initializeCircularProgress();
+            initializeAttendanceChart('week');
+            loadRecentActivities();
+            
+            // Set up event listeners
+            document.querySelectorAll('.period-selector .btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const period = this.dataset.period;
+                    document.querySelectorAll('.period-selector .btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    initializeAttendanceChart(period);
                 });
-                this.classList.add('active');
-                initializeAttendanceChart(period);
             });
-        });
+        }
     } catch (error) {
+        // Remove loading spinner
+        loadingSpinner.remove();
+        
         console.error('Error initializing page:', error);
-        showAlert('Error loading subject details. Please try again later.', 'danger');
+        showAlert('Error loading subject details. ' + error.message, 'danger');
     }
 });
 
@@ -70,41 +91,135 @@ document.addEventListener('DOMContentLoaded', async function() {
 async function fetchSubjectData() {
     try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`/api/subjects/${subjectId}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`API responded with status: ${response.status}`);
+        if (!token) {
+            throw new Error('No authentication token found');
         }
         
-        subjectData = await response.json();
+        // Initialize subject data variable
+        let subjectDataResult = null;
+        
+        // Try API call first
+        try {
+            const response = await fetch('/api/v1/user/subjects', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                // If response is not ok, handle specific status codes
+                if (response.status === 401) {
+                    localStorage.removeItem('token');
+                    window.location.href = '../new_signin_signup/index.html';
+                    return;
+                }
+                throw new Error(`API responded with status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (!data.subjects || !Array.isArray(data.subjects)) {
+                throw new Error('Invalid response format');
+            }
+            
+            // Find the subject by ID or name
+            if (subjectId) {
+                subjectDataResult = data.subjects.find(s => s._id === subjectId);
+            } else if (subjectName) {
+                subjectDataResult = data.subjects.find(s => s.name === subjectName);
+            }
+        } catch (apiError) {
+            console.error('API Error:', apiError);
+            // Continue to fallback methods
+        }
+        
+        // If API didn't work, try sessionStorage
+        if (!subjectDataResult) {
+            console.log('API lookup failed, trying sessionStorage...');
+            try {
+                const sessionSubject = sessionStorage.getItem('currentSubject');
+                if (sessionSubject) {
+                    const parsedSubject = JSON.parse(sessionSubject);
+                    
+                    // Verify it's the correct subject
+                    if ((subjectId && parsedSubject._id === subjectId) || 
+                        (subjectName && parsedSubject.name === subjectName)) {
+                        console.log('Found matching subject in sessionStorage');
+                        subjectDataResult = parsedSubject;
+                    }
+                }
+            } catch (sessionError) {
+                console.error('Session storage error:', sessionError);
+            }
+        }
+        
+        // If still no data, throw error
+        if (!subjectDataResult) {
+            throw new Error('Subject not found in API or session storage');
+        }
+        
+        // Set the subject data
+        subjectData = subjectDataResult;
         
         // Update UI with subject data
         document.getElementById('subjectTitle').textContent = subjectData.name;
-        document.getElementById('totalClasses').textContent = subjectData.totalClasses || 0;
-        document.getElementById('presentCount').textContent = subjectData.presentCount || 0;
-        document.getElementById('absentCount').textContent = subjectData.absentCount || 0;
-        document.getElementById('lateCount').textContent = subjectData.lateCount || 0;
         
-        // Update hours
-        document.getElementById('totalHours').textContent = subjectData.totalHours || 0;
+        // Use available data or default to 0
+        const totalClasses = subjectData.totalClass || 0;
+        const presentCount = subjectData.totalPresent || 0;
+        const absentCount = totalClasses - presentCount;
+        const lateCount = 0; // Not tracking late status currently
         
-        // Update streak
-        document.getElementById('currentStreak').textContent = subjectData.currentStreak || 0;
-        document.getElementById('bestStreak').textContent = subjectData.bestStreak || 0;
+        document.getElementById('totalClasses').textContent = totalClasses;
+        document.getElementById('presentCount').textContent = presentCount;
+        document.getElementById('absentCount').textContent = absentCount;
+        document.getElementById('lateCount').textContent = lateCount;
         
-        const streakPercentage = (subjectData.currentStreak / subjectData.bestStreak) * 100 || 0;
-        document.querySelector('.streak-progress .progress-bar').style.width = `${Math.min(streakPercentage, 100)}%`;
+        // Update hours (assuming 1 class = 1 hour)
+        document.getElementById('totalHours').textContent = presentCount;
+        
+        // For now, set streak to 0 as it's not being tracked yet
+        document.getElementById('currentStreak').textContent = 0;
+        document.getElementById('bestStreak').textContent = 0;
+        
+        // Clear sessionStorage after successful load
+        try {
+            sessionStorage.removeItem('currentSubject');
+        } catch (e) {
+            console.error('Error clearing sessionStorage:', e);
+        }
         
         return subjectData;
     } catch (error) {
         console.error('Error fetching subject data:', error);
-        showAlert('Failed to load subject data', 'danger');
+        
+        // Create an error container
+        const container = document.querySelector('.container');
+        if (container) {
+            container.innerHTML = `
+                <div class="error-container">
+                    <i class="bi bi-exclamation-triangle-fill error-icon"></i>
+                    <h3>Unable to Load Subject</h3>
+                    <p>${error.message || 'There was a problem loading the subject details.'}</p>
+                    <div class="d-flex gap-2 justify-content-center">
+                        <a href="../dashboard/dashboard.html" class="btn btn-primary">Return to Dashboard</a>
+                        <button onclick="location.reload()" class="btn btn-outline-secondary">Try Again</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Check if we should redirect based on error type
+        if (error.message.includes('authentication') || error.message.includes('401')) {
+            showAlert('Authentication failed. Redirecting to login...', 'danger');
+            setTimeout(() => {
+                localStorage.removeItem('token');
+                window.location.href = '../new_signin_signup/index.html';
+            }, 2000);
+        }
+        
         throw error;
     }
 }
@@ -119,12 +234,12 @@ function initializeCircularProgress() {
 
 // Calculate attendance percentage
 function calculateAttendancePercentage() {
-    if (!subjectData || !subjectData.totalClasses || subjectData.totalClasses === 0) {
+    if (!subjectData || !subjectData.totalClass || subjectData.totalClass === 0) {
         return 0;
     }
     
-    const presentCount = subjectData.presentCount || 0;
-    const percentage = (presentCount / subjectData.totalClasses) * 100;
+    const presentCount = subjectData.totalPresent || 0;
+    const percentage = (presentCount / subjectData.totalClass) * 100;
     return Math.round(percentage);
 }
 

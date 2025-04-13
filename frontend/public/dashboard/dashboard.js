@@ -255,10 +255,27 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             // Use different URLs based on what data we have
             if (subject._id) {
-                subjectCard.href = `../sub1_page/index.html?id=${subject._id}`;
+                // Make sure _id isn't undefined or null
+                subjectCard.href = `../sub1_page/index.html?id=${encodeURIComponent(subject._id)}`;
+                subjectCard.setAttribute('data-subject-id', subject._id);
             } else {
                 subjectCard.href = `../sub1_page/index.html?name=${encodeURIComponent(subject.name)}`;
             }
+            
+            // Add click event to handle navigation properly
+            subjectCard.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // Store current subject in sessionStorage for backup
+                try {
+                    sessionStorage.setItem('currentSubject', JSON.stringify(subject));
+                } catch (err) {
+                    console.error('Error storing subject in session:', err);
+                }
+                
+                // Navigate to the subject detail page
+                window.location.href = this.href;
+            });
             
             subjectCard.className = `subject-card card p-4 text-center`;
             
