@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     // Get elements
     const subjectGrid = document.getElementById('subjectGrid');
     const emptyState = document.getElementById('emptyState');
@@ -37,8 +37,14 @@ document.addEventListener('DOMContentLoaded', function() {
     emptyState.classList.add('d-none');
     subjectGrid.classList.add('d-none');
     
+    // Setup subject modal functionality
+    setupSubjectModal();
+    
+    // Setup notifications dropdown
+    setupNotifications();
+    
     // Directly fetch dashboard data from API
-    fetchDashboardData();
+    await fetchDashboardData();
     
     // Handle schedule link click
     scheduleLink.addEventListener('click', function(e) {
@@ -48,26 +54,27 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Function to fetch dashboard data
-    function fetchDashboardData() {
+    async function fetchDashboardData() {
         // Show loading indicator
         loadingIndicator.classList.remove('d-none');
         emptyState.classList.add('d-none');
         subjectGrid.classList.add('d-none');
         
-        fetch('/api/v1/user/dashboard', {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        })
-        .then(response => {
+        try {
+            const response = await fetch('/api/v1/user/dashboard', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
             if (!response.ok) {
                 throw new Error('Failed to fetch dashboard data');
             }
-            return response.json();
-        })
-        .then(data => {
+            
+            const data = await response.json();
+            
             // Hide loading indicator
             loadingIndicator.classList.add('d-none');
             
@@ -94,8 +101,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 localStorage.setItem('username', data.user.username);
                 username.textContent = data.user.username;
             }
-        })
-        .catch(error => {
+        } catch (error) {
             console.error('Error fetching dashboard data:', error);
             
             // Hide loading indicator
@@ -110,7 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Show empty state if no subjects in localStorage either
                 showEmptyState();
             }
-        });
+        }
     }
     
     // Function to get subjects from localStorage
@@ -495,7 +501,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Refresh the dashboard
-            fetchDashboardData();
+            await fetchDashboardData();
             
             // Show success message
             alert(`Subject "${subjectName}" has been removed.`);
@@ -504,5 +510,190 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error removing subject:', error);
             alert(`Failed to remove subject: ${error.message}`);
         }
+    }
+
+    // Save subjects to localStorage with user-specific key
+    function saveSubjectsToLocalStorage(token, subjects) {
+        try {
+            const userInfo = parseToken(token);
+            if (!userInfo || !userInfo.id) {
+                console.error('Could not extract user ID from token');
+                return;
+            }
+            
+            localStorage.setItem(`subjects_${userInfo.id}`, JSON.stringify(subjects));
+        } catch (error) {
+            console.error('Error saving subjects to localStorage:', error);
+        }
+    }
+
+    // Create subject via API with retry logic
+    async function createSubjectWithRetry(token, subjectName, maxRetries = 2) {
+        let retries = 0;
+        
+        while (retries <= maxRetries) {
+            try {
+                console.log(`Attempting to create subject: ${subjectName} (attempt ${retries + 1})`);
+                
+                const response = await fetch('/api/v1/user/subjects', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name: subjectName })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log(`Subject ${subjectName} processed:`, data);
+                    return data;
+                }
+                
+                if (response.status === 400) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error(`Bad request for ${subjectName}:`, errorData);
+                    throw new Error(`Failed to create subject: ${subjectName} (Status: ${response.status})`);
+                }
+                
+                const errorData = await response.json().catch(() => ({}));
+                console.error(`Server error for ${subjectName}:`, response.status, errorData);
+                
+                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+                retries++;
+                
+            } catch (error) {
+                if (retries >= maxRetries) {
+                    console.error(`All retry attempts failed for ${subjectName}:`, error);
+                    throw error;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+                retries++;
+            }
+        }
+        
+        throw new Error(`Failed to create subject after ${maxRetries} retries: ${subjectName}`);
+    }
+
+    // Generate subject input fields based on dropdown selection
+    function generateSubjectInputs() {
+        const container = document.getElementById('subjectsContainer');
+        container.innerHTML = '';
+        
+        const numSubjectsSelect = document.getElementById('numSubjects');
+        const count = parseInt(numSubjectsSelect.value);
+        
+        for (let i = 1; i <= count; i++) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-floating mb-3';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control';
+            input.id = `subject${i}`;
+            input.name = `subject${i}`;
+            input.placeholder = `Subject ${i}`;
+            input.required = true;
+            input.setAttribute("autocomplete", "off");
+
+            const label = document.createElement('label');
+            label.setAttribute('for', `subject${i}`);
+            label.textContent = `Subject ${i}`;
+
+            wrapper.appendChild(input);
+            wrapper.appendChild(label);
+            container.appendChild(wrapper);
+        }
+    }
+
+    // Handle Modal Subject Addition
+    async function setupSubjectModal() {
+        const numSubjectsSelect = document.getElementById('numSubjects');
+        const saveSubjectsBtn = document.getElementById('saveSubjectsBtn');
+        const addSubjectModal = document.getElementById('addSubjectModal');
+        const modal = new bootstrap.Modal(addSubjectModal);
+        
+        // Generate subject inputs when dropdown changes
+        numSubjectsSelect.addEventListener('change', function() {
+            generateSubjectInputs();
+        });
+        
+        // Initialize with 1 subject by default
+        numSubjectsSelect.value = "1";
+        generateSubjectInputs();
+        
+        // Handle save button click
+        saveSubjectsBtn.addEventListener('click', async function() {
+            saveSubjectsBtn.disabled = true;
+            saveSubjectsBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+            
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    showAlert('danger', 'Session expired. Please sign in again.');
+                    setTimeout(() => window.location.href = '../new_signin_signup/index.html', 2000);
+                    return;
+                }
+                
+                // Get subject names from inputs
+                const subjectInputs = document.querySelectorAll('#subjectsContainer input');
+                const newSubjects = [];
+                
+                for (const input of subjectInputs) {
+                    const subjectName = input.value.trim();
+                    if (subjectName) {
+                        newSubjects.push(subjectName);
+                    }
+                }
+                
+                if (newSubjects.length === 0) {
+                    showAlert('warning', 'Please enter at least one subject name.');
+                    saveSubjectsBtn.disabled = false;
+                    saveSubjectsBtn.textContent = 'Save Subjects';
+                    return;
+                }
+                
+                // Create subjects via API
+                const creationPromises = newSubjects.map(name => 
+                    createSubjectWithRetry(token, name)
+                );
+                
+                await Promise.all(creationPromises);
+                
+                // Close modal
+                modal.hide();
+                
+                // Refresh subjects display
+                await fetchDashboardData();
+                
+                // Show success message
+                showAlert('success', 'Subjects added successfully!');
+                
+            } catch (error) {
+                console.error('Error creating subjects:', error);
+                
+                let errorMessage = 'Failed to add subjects. ';
+                if (error.message && error.message.includes('Status: 401')) {
+                    errorMessage += 'Your session has expired. Please sign in again.';
+                    setTimeout(() => {
+                        localStorage.removeItem('token');
+                        window.location.href = '../new_signin_signup/index.html';
+                    }, 2000);
+                } else {
+                    errorMessage += 'Please try again.';
+                }
+                
+                showAlert('danger', errorMessage);
+            } finally {
+                saveSubjectsBtn.disabled = false;
+                saveSubjectsBtn.textContent = 'Save Subjects';
+            }
+        });
+    }
+
+    // Setup notifications dropdown
+    function setupNotifications() {
+        // Implementation of setupNotifications function
     }
 });
