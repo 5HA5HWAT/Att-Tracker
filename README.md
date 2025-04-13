@@ -23,7 +23,7 @@ The prediction feature uses a Random Forest classifier trained on historical att
 1. Make sure you have Node.js and Python installed
 2. Install backend dependencies: `cd backend && npm install`
 3. Install Python dependencies: `cd Python_projects && pip install -r require.txt`
-4. Start both servers using the provided batch file: `start_server.bat`
+4. Start both servers using the provided batch file: `npm run start`
 
 ## Development
 
