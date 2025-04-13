@@ -1,5 +1,5 @@
 body {
-  background: #f8f9fa;
+  background-color: #f0f2f5;
 }
 
 .nav-link.active {
@@ -18,28 +18,28 @@ body {
   .subject-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1.5rem;
+    gap: 20px;
   }
 
   .subject-card {
+    display: block;
     text-decoration: none;
-    color: #212529;
+    color: inherit;
     transition: transform 0.2s, box-shadow 0.2s;
-    position: relative;
-    overflow: hidden;
+    height: 100%;
   }
 
   .subject-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-    color: #212529;
-    text-decoration: none;
   }
 
   .subject-icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-    color: #0d6efd;
+    margin-bottom: 15px;
+  }
+
+  .subject-icon i {
+    font-size: 2.5rem;
   }
 
   .subject-good {
@@ -101,19 +101,16 @@ body {
   }
 
   .attendance-indicator {
-    margin-top: 1rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    margin-top: 15px;
   }
 
   .attendance-percentage {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
+    font-size: 1.75rem;
+    font-weight: bold;
   }
 
   .attendance-details {
-    font-size: 0.875rem;
+    font-size: 0.9rem;
     color: #6c757d;
   }
 
@@ -130,10 +127,9 @@ body {
   }
 
   .empty-icon {
-    font-size: 4rem;
-    color: #6c757d;
-    opacity: 0.5;
     display: block;
+    font-size: 5rem;
+    color: #dee2e6;
     margin-bottom: 1rem;
   }
 
@@ -170,6 +166,26 @@ body {
     .subject-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* Card container for subject and remove button */
+  .subject-card-container {
+    position: relative;
+    margin-bottom: 10px;
+  }
+
+  .subject-card-container .remove-subject-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    display: none;
+    z-index: 10;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .subject-card-container:hover .remove-subject-btn {
+    display: inline-block;
   }
   
   

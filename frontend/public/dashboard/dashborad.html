@@ -75,9 +75,9 @@
   <div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h2 class="mb-0">Your Subjects</h2>
-      <a href="../sub_choose_page/index.html" class="btn btn-primary">
+      <button id="addSubjectBtn" class="btn btn-primary">
         <i class="bi bi-plus-circle me-1"></i>Add Subject
-      </a>
+      </button>
     </div>
 
     <!-- Loading indicator -->
@@ -95,9 +95,9 @@
       </div>
       <h3>No Subjects Added Yet</h3>
       <p class="text-muted">Start by adding subjects to track your attendance.</p>
-      <a href="../sub_choose_page/index.html" class="btn btn-primary mt-3">
+      <button id="emptyStateAddBtn" class="btn btn-primary mt-3">
         <i class="bi bi-plus-circle me-2"></i>Add Subjects
-      </a>
+      </button>
     </div>
 
     <!-- Subject Grid - No static content here, will be filled by JavaScript -->
@@ -108,6 +108,29 @@
       <a href="../daily_activity/index.html" class="btn btn-lg btn-primary">
         <i class="bi bi-calendar-check me-2"></i>Today's Activity
       </a>
+    </div>
+  </div>
+
+  <!-- Add Subject Modal -->
+  <div class="modal fade" id="subjectModal" tabindex="-1" aria-labelledby="subjectModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="subjectModalLabel">Add New Subject</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="createSubjectForm">
+            <div class="mb-3">
+              <label for="newSubjectInput" class="form-label">Subject Name</label>
+              <input type="text" class="form-control" id="newSubjectInput" placeholder="Enter subject name" required>
+            </div>
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary" id="createSubjectBtn">Create</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
 
