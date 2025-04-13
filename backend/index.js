@@ -72,6 +72,35 @@ app.get("/signin", (req, res) => {
   res.sendFile(path.join(staticPath, "new_signin_signup/index.html"));
 });
 
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  
+  // Log request body for POST/PUT requests (excluding sensitive data)
+  if ((req.method === 'POST' || req.method === 'PUT') && req.body) {
+    const sanitizedBody = { ...req.body };
+    // Redact sensitive fields if present
+    if (sanitizedBody.password) sanitizedBody.password = '[REDACTED]';
+    console.log('Request body:', JSON.stringify(sanitizedBody));
+  }
+  
+  // Capture and log response data
+  const originalSend = res.send;
+  res.send = function(data) {
+    const statusCode = res.statusCode;
+    
+    // Log error responses
+    if (statusCode >= 400) {
+      console.error(`Error response ${statusCode} for ${req.method} ${req.url}:`, data);
+    }
+    
+    // Continue with the original send
+    originalSend.call(this, data);
+  };
+  
+  next();
+});
+
 // Handle all other routes
 app.get("*", (req, res, next) => {
   // Don't interfere with API routes or static files

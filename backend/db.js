@@ -52,6 +52,9 @@ const subjectSchema = new Schema({
     }
 });
 
+// Add compound index to enforce unique subject names per user
+subjectSchema.index({ userId: 1, name: 1 }, { unique: true });
+
 // Schedule schema to store user schedules
 const scheduleSchema = new Schema({
     userId: {
@@ -78,12 +81,51 @@ const scheduleSchema = new Schema({
     }
 });
 
+// Attendance schema to store daily attendance records
+const attendanceSchema = new Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
+    date: {
+        type: Date,
+        required: true
+    },
+    dayOfWeek: {
+        type: String,
+        enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        required: true
+    },
+    records: [{
+        subject: {
+            type: String,
+            required: true
+        },
+        status: {
+            type: String,
+            enum: ['Present', 'Absent', 'No Class Today', 'Not Selected'],
+            required: true
+        }
+    }],
+    created_at: {
+        type: Date,
+        default: Date.now
+    },
+    updated_at: {
+        type: Date,
+        default: Date.now
+    }
+});
+
 const User = mongoose.model("User", userSchema)
 const Subject = mongoose.model("Subject", subjectSchema)
 const Schedule = mongoose.model("Schedule", scheduleSchema)
+const Attendance = mongoose.model("Attendance", attendanceSchema)
 
 module.exports = {
     User,
     Subject,
-    Schedule
+    Schedule,
+    Attendance
 }
