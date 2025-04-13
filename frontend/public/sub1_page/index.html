@@ -25,7 +25,7 @@
         <!-- Stats Overview -->
         <div class="row mb-4">
             <!-- Attendance Circle -->
-            <div class="col-md-6 mb-3">
+            <div class="col-md-12 mb-3">
                 <div class="card h-100">
                     <div class="card-body text-center d-flex flex-column align-items-center justify-content-center">
                         <h5 class="card-title">Attendance Rate</h5>
@@ -61,31 +61,6 @@
                     </div>
                 </div>
             </div>
-            
-            <!-- Streak -->
-            <div class="col-md-6 mb-3">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h5 class="card-title">Streak</h5>
-                        
-                        <div class="streak-info">
-                            <div class="d-flex justify-content-between mb-1">
-                                <span>Current</span>
-                                <span>Best</span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-2">
-                                <span id="currentStreak" class="streak-count">0</span>
-                                <span id="bestStreak" class="streak-count">0</span>
-                            </div>
-                            <div class="streak-progress">
-                                <div class="progress">
-                                    <div class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
         
         <!-- Attendance Chart -->
@@ -97,8 +72,6 @@
                             <h5 class="card-title mb-0">Attendance History</h5>
                             <div class="period-selector btn-group">
                                 <button type="button" class="btn btn-sm btn-outline-primary active" data-period="week">Week</button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-period="month">Month</button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-period="semester">Semester</button>
                             </div>
                         </div>
                         <div class="chart-container">
@@ -113,7 +86,7 @@
     <!-- Footer -->
     <footer class="bg-light py-3 mt-4">
         <div class="container text-center">
-            <p class="text-muted mb-0">© 2023 Attendance Tracker. All rights reserved.</p>
+            <!-- Copyright removed -->
         </div>
     </footer>
     

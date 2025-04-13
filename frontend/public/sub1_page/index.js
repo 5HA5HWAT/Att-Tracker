@@ -56,17 +56,20 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Fetch subject data
         await fetchSubjectData();
         
+        // Immediately sync with database to get the latest attendance data
+        // This is crucial for showing today's attendance
+        console.log('Initial database sync starting...');
+        const syncResult = await syncAttendanceWithDatabase();
+        console.log('Initial database sync result:', syncResult);
+        
         // Remove loading spinner
         loadingSpinner.remove();
         
         // Only initialize components if data was loaded successfully
         if (subjectData) {
-            // Initialize components
+            // Initialize components after we have the latest data
             initializeCircularProgress();
             initializeAttendanceChart('week');
-            
-            // Sync with database to check for any new attendance records
-            await syncAttendanceWithDatabase();
             
             // Set up event listeners
             document.querySelectorAll('.period-selector .btn').forEach(button => {
@@ -100,8 +103,80 @@ async function fetchSubjectData() {
         // Initialize subject data variable
         let subjectDataResult = null;
         
-        // Try API call first
+        // Try comprehensive API call first
         try {
+            // Get the subject ID from the URL or use the name to fetch the ID first
+            let targetSubjectId = subjectId;
+            
+            if (!targetSubjectId && subjectName) {
+                // First need to get the subject ID by name
+                const subjectsResponse = await fetch('/api/v1/user/subjects', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!subjectsResponse.ok) {
+                    throw new Error(`API responded with status: ${subjectsResponse.status}`);
+                }
+                
+                const subjectsData = await subjectsResponse.json();
+                const foundSubject = subjectsData.subjects.find(s => s.name === subjectName);
+                if (foundSubject) {
+                    targetSubjectId = foundSubject._id;
+                } else {
+                    throw new Error(`Subject "${subjectName}" not found`);
+                }
+            }
+            
+            if (!targetSubjectId) {
+                throw new Error('No subject ID available');
+            }
+            
+            // Now get the complete subject data with attendance records
+            const response = await fetch(`/api/v1/user/subjects/${targetSubjectId}/complete`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                // If response is not ok, handle specific status codes
+                if (response.status === 401) {
+                    localStorage.removeItem('token');
+                    window.location.href = '../new_signin_signup/index.html';
+                    return;
+                }
+                
+                // If the subject/complete endpoint is not available, fall back to separate calls
+                if (response.status === 404) {
+                    throw new Error('Complete subject endpoint not available');
+                }
+                
+                throw new Error(`API responded with status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (!data.subject) {
+                throw new Error('Invalid response format');
+            }
+            
+            // Use the complete data from the API
+            subjectDataResult = data.subject;
+            
+            // Log that we got complete data
+            console.log('Fetched complete subject data from API:', subjectDataResult);
+        } catch (completeApiError) {
+            console.error('Complete API Error:', completeApiError);
+            
+            // Fall back to separate API calls
+            console.log('Falling back to separate API calls');
+            
             const response = await fetch('/api/v1/user/subjects', {
                 method: 'GET',
                 headers: {
@@ -154,38 +229,35 @@ async function fetchSubjectData() {
                     } else {
                         console.warn('Failed to fetch attendance records');
                     }
-                } catch (attendanceError) {
-                    console.error('Error fetching attendance:', attendanceError);
-                }
-            }
-        } catch (apiError) {
-            console.error('API Error:', apiError);
-            // Continue to fallback methods
-        }
-        
-        // If API didn't work, try sessionStorage
-        if (!subjectDataResult) {
-            console.log('API lookup failed, trying sessionStorage...');
-            try {
-                const sessionSubject = sessionStorage.getItem('currentSubject');
-                if (sessionSubject) {
-                    const parsedSubject = JSON.parse(sessionSubject);
                     
-                    // Verify it's the correct subject
-                    if ((subjectId && parsedSubject._id === subjectId) || 
-                        (subjectName && parsedSubject.name === subjectName)) {
-                        console.log('Found matching subject in sessionStorage');
-                        subjectDataResult = parsedSubject;
+                    // Now fetch stats data for exact counts
+                    const statsResponse = await fetch(`/api/v1/user/subjects/${subjectDataResult._id}/stats`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    if (statsResponse.ok) {
+                        const statsData = await statsResponse.json();
+                        if (statsData && statsData.stats) {
+                            // Add stats data to the subject data
+                            subjectDataResult.stats = statsData.stats;
+                            console.log('Fetched stats data:', statsData.stats);
+                        }
+                    } else {
+                        console.warn('Failed to fetch stats data');
                     }
+                } catch (additionalDataError) {
+                    console.error('Error fetching additional data:', additionalDataError);
                 }
-            } catch (sessionError) {
-                console.error('Session storage error:', sessionError);
             }
         }
         
         // If still no data, throw error
         if (!subjectDataResult) {
-            throw new Error('Subject not found in API or session storage');
+            throw new Error('Subject not found in API');
         }
         
         // Set the subject data
@@ -194,18 +266,33 @@ async function fetchSubjectData() {
         // Update UI with subject data
         document.getElementById('subjectTitle').textContent = subjectData.name;
         
-        // Use available data or default to 0
-        const totalClasses = subjectData.totalClass || 0;
-        const presentCount = subjectData.totalPresent || 0;
-        const absentCount = totalClasses - presentCount;
+        // Use data from the database or calculate based on attendance records
+        let totalClasses = 0;
+        let presentCount = 0;
+        let absentCount = 0;
+        
+        // First try to use stats from the API if available
+        if (subjectData.stats) {
+            totalClasses = subjectData.stats.totalClasses || 0;
+            presentCount = subjectData.stats.presentCount || 0;
+            absentCount = subjectData.stats.absentCount || 0;
+        } 
+        // Then try to calculate from attendance records
+        else if (subjectData.attendance && Array.isArray(subjectData.attendance)) {
+            totalClasses = subjectData.attendance.length;
+            presentCount = subjectData.attendance.filter(record => record.status === 'present').length;
+            absentCount = subjectData.attendance.filter(record => record.status === 'absent').length;
+        } 
+        // Finally fall back to basic subject data
+        else {
+            totalClasses = subjectData.totalClass || 0;
+            presentCount = subjectData.totalPresent || 0;
+            absentCount = totalClasses - presentCount;
+        }
         
         document.getElementById('totalClasses').textContent = totalClasses;
         document.getElementById('presentCount').textContent = presentCount;
         document.getElementById('absentCount').textContent = absentCount;
-        
-        // For now, set streak to 0 as it's not being tracked yet
-        document.getElementById('currentStreak').textContent = 0;
-        document.getElementById('bestStreak').textContent = 0;
         
         // Clear sessionStorage after successful load
         try {
@@ -303,32 +390,54 @@ function initializeAttendanceChart(period) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: {
-                x: {
-                    stacked: true,
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
-            },
             plugins: {
                 legend: {
                     position: 'top',
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45,
+                        font: {
+                            size: 11
+                        }
+                    }
                 },
-                tooltip: {
-                    mode: 'index',
-                    intersect: false
+                y: {
+                    beginAtZero: true,
+                    // Calculate max based on the data
+                    suggestedMax: Math.max(
+                        ...presentData, 
+                        ...absentData,
+                        1  // Fallback to at least 1
+                    ),
+                    ticks: {
+                        stepSize: calculateStepSize(presentData, absentData),
+                        precision: 0
+                    }
                 }
             }
         }
     });
+}
+
+// Helper function to calculate appropriate step size for the y-axis
+function calculateStepSize(presentData, absentData) {
+    const maxValue = Math.max(...presentData, ...absentData, 1);
+    
+    // For small values, use 1
+    if (maxValue <= 5) return 1;
+    
+    // For larger values, make steps that divide the range nicely
+    if (maxValue <= 20) return 2;
+    if (maxValue <= 50) return 5;
+    
+    return Math.ceil(maxValue / 10);
 }
 
 // Generate chart data based on period
@@ -338,9 +447,121 @@ function generateChartData(period) {
     let presentData = [];
     let absentData = [];
     
-    // Get actual dates and attendance from subject data if available
-    if (subjectData && subjectData.attendance && Array.isArray(subjectData.attendance)) {
-        const attendanceRecords = subjectData.attendance;
+    // Log detailed debugging information about available data
+    console.log('Subject data:', subjectData);
+    
+    // Prepare attendance data - ensure it's properly accessible
+    let attendanceRecords = [];
+    
+    if (subjectData) {
+        // Check for attendance in various possible locations in the data structure
+        if (subjectData.attendance && Array.isArray(subjectData.attendance)) {
+            attendanceRecords = subjectData.attendance;
+            console.log('Found attendance records in subjectData.attendance:', attendanceRecords.length);
+        } else if (subjectData.stats && subjectData.stats.totalClasses > 0) {
+            console.log('Found attendance stats but no records, will use stats for display');
+            // We at least have stats, so we can show something
+            if (!attendanceRecords.length && subjectData.stats.absentCount > 0) {
+                // Create a mock record for display based on stats
+                attendanceRecords = [{
+                    date: new Date().toISOString().split('T')[0],
+                    status: 'absent'
+                }];
+                console.log('Created mock record from stats:', attendanceRecords);
+            }
+        }
+        
+        // Normalize dates in attendance records for consistent comparison
+        if (attendanceRecords.length > 0) {
+            const normalizeDate = (dateString) => {
+                try {
+                    return new Date(dateString).toISOString().split('T')[0];
+                } catch (e) {
+                    console.error('Error normalizing date:', dateString, e);
+                    return dateString;
+                }
+            };
+            
+            attendanceRecords = attendanceRecords.map(record => {
+                if (record.date) {
+                    return { ...record, date: normalizeDate(record.date) };
+                }
+                return record;
+            });
+            
+            console.log('Normalized attendance records:', attendanceRecords);
+        }
+    }
+    
+    // Check for UI display data even if we don't have actual attendance records
+    // This ensures the UI shows something consistent with the stats counters
+    const presentCount = parseInt(document.getElementById('presentCount').textContent) || 0;
+    const absentCount = parseInt(document.getElementById('absentCount').textContent) || 0;
+    const totalClasses = parseInt(document.getElementById('totalClasses').textContent) || 0;
+    
+    console.log('UI counts - Present:', presentCount, 'Absent:', absentCount, 'Total:', totalClasses);
+    
+    // Use actual records if available, otherwise use UI data
+    const hasAttendanceData = attendanceRecords.length > 0 || totalClasses > 0;
+    
+    if (!hasAttendanceData) {
+        console.log('No attendance data available for chart');
+        // Only show warning if no data is visible anywhere
+        if (totalClasses === 0) {
+            showAlert('No attendance data available. Please mark attendance first.', 'warning');
+        }
+        
+        // Return empty data structure with date labels
+    if (period === 'week') {
+            // Generate current week days as labels but with empty data
+            const today = new Date();
+            const currentDay = today.getDay(); // 0 (Sunday) to 6 (Saturday)
+            const startDate = new Date(today);
+            // Adjust to previous Monday (or today if it's Monday)
+            startDate.setDate(today.getDate() - (currentDay === 0 ? 6 : currentDay - 1));
+            
+            // Generate the 7 days of the week
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(startDate);
+                date.setDate(startDate.getDate() + i);
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                const dayNumber = date.getDate(); 
+                labels.push(`${dayName} ${dayNumber}`);
+                presentData.push(0);
+                absentData.push(0);
+            }
+    } else if (period === 'month') {
+        labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+            presentData = [0, 0, 0, 0];
+            absentData = [0, 0, 0, 0];
+    } else if (period === 'semester') {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            
+            // Create labels for the last 6 months
+            for (let i = 5; i >= 0; i--) {
+                const monthIndex = (currentMonth - i + 12) % 12;
+                labels.unshift(monthNames[monthIndex]);
+                presentData.unshift(0);
+                absentData.unshift(0);
+            }
+        }
+        
+        return { labels, presentData, absentData };
+    }
+    
+    // Process data based on period
+    if (hasAttendanceData) {
+        // Helper function to normalize date format
+        const normalizeDate = (dateString) => {
+            try {
+                return new Date(dateString).toISOString().split('T')[0];
+            } catch (e) {
+                console.error('Error normalizing date:', dateString, e);
+                return dateString;
+            }
+        };
         
         if (period === 'week') {
             // Generate current week days (Monday to Sunday)
@@ -357,31 +578,88 @@ function generateChartData(period) {
                 
                 // Format date as short day name (Mon, Tue, etc.)
                 const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                labels.push(dayName);
+                const dayNumber = date.getDate(); // Get the day of month
+                labels.push(`${dayName} ${dayNumber}`); // Format as "Mon 15"
                 
                 // Format date as ISO string to match with records
-                const dateStr = date.toISOString().split('T')[0];
+                const dateStr = normalizeDate(date);
+                console.log(`Looking for attendance on: ${dateStr}`);
                 
-                // Look for attendance record for this date
-                const record = attendanceRecords.find(r => {
-                    const recordDate = new Date(r.date).toISOString().split('T')[0];
-                    return recordDate === dateStr;
-                });
+                // Special handling for today's date
+                const isToday = dateStr === normalizeDate(new Date());
+                if (isToday) {
+                    console.log('Processing TODAY\'s attendance data:', dateStr);
+                }
                 
-                // Set attendance status
-                if (record) {
-                    if (record.status === 'present') {
+                // Check if we have real attendance records
+                if (attendanceRecords.length > 0) {
+                    // Look for attendance record for this date
+                    const record = attendanceRecords.find(r => {
+                        const recordDate = normalizeDate(r.date);
+                        const isMatch = recordDate === dateStr;
+                        console.log(`  Comparing with record date: ${recordDate}, match: ${isMatch}`);
+                        return isMatch;
+                    });
+                    
+                    console.log(`  Record found for ${dateStr}:`, record);
+                    
+                    // Set attendance status
+                    if (record) {
+                        if (record.status === 'present') {
+                            presentData.push(1);
+                            absentData.push(0);
+                        } else if (record.status === 'absent') {
+                            presentData.push(0);
+                            absentData.push(1);
+                        } else {
+                            presentData.push(0);
+                            absentData.push(0);
+                        }
+                    } else if (isToday && presentCount > 0 && absentCount === 0) {
+                        // If it's today and we have present count but no specific record
+                        // This helps when data just shows in the UI stats but not in records yet
+                        console.log('Showing today as present based on presentCount:', presentCount);
                         presentData.push(1);
                         absentData.push(0);
-                    } else if (record.status === 'absent') {
-                        presentData.push(0);
-                        absentData.push(1);
                     } else {
+                        // No record for this date
+                        presentData.push(0);
+                        absentData.push(0);
+                    }
+                } else if (totalClasses > 0) {
+                    // We don't have detailed records but we have totals
+                    // Show data on today's date if this is a new record
+                    const isToday = dateStr === normalizeDate(new Date());
+                    
+                    if (isToday) {
+                        console.log('Processing TODAY with summary stats - Present count:', presentCount);
+                        
+                        if (presentCount > 0 && absentCount === 0) {
+                            // If we have only present records, mark today as present
+                            console.log('Marking TODAY as PRESENT based on stats');
+                            presentData.push(1);
+                            absentData.push(0);
+                        } else if (absentCount > 0 && presentCount === 0) {
+                            // If we have only absent records, mark today as absent
+                            console.log('Marking TODAY as ABSENT based on stats');
+                            presentData.push(0);
+                            absentData.push(1);
+                        } else if (presentCount > 0) {
+                            // If we have both but present is greater than 0, prioritize showing present for today
+                            console.log('Prioritizing PRESENT status for TODAY with mixed stats');
+                            presentData.push(1);
+                            absentData.push(0);
+                        } else {
+                            presentData.push(0);
+                            absentData.push(0);
+                        }
+                    } else {
+                        // No record for other dates
                         presentData.push(0);
                         absentData.push(0);
                     }
                 } else {
-                    // No record for this date
+                    // No data at all
                     presentData.push(0);
                     absentData.push(0);
                 }
@@ -395,34 +673,61 @@ function generateChartData(period) {
             const fourWeeksAgo = new Date(now);
             fourWeeksAgo.setDate(now.getDate() - 28);
             
-            // Initialize counters for each week
+            // Initialize counters for each week (most recent to oldest)
             const weeklyData = [
-                { present: 0, absent: 0 },
-                { present: 0, absent: 0 },
-                { present: 0, absent: 0 },
-                { present: 0, absent: 0 }
+                { present: 0, absent: 0 }, // Week 1 (most recent week)
+                { present: 0, absent: 0 }, // Week 2
+                { present: 0, absent: 0 }, // Week 3
+                { present: 0, absent: 0 }  // Week 4 (oldest week)
             ];
             
-            // Process attendance records
-            attendanceRecords.forEach(record => {
-                const recordDate = new Date(record.date);
+            // Check if we have real attendance records
+            if (attendanceRecords.length > 0) {
+                console.log('Building month view from attendance records:', attendanceRecords.length);
                 
-                // Only count records from the last 4 weeks
-                if (recordDate >= fourWeeksAgo) {
-                    // Calculate which week this record belongs to (0-3)
-                    const weekIndex = Math.floor((now - recordDate) / (7 * 24 * 60 * 60 * 1000));
-                    
-                    if (weekIndex >= 0 && weekIndex < 4) {
-                        if (record.status === 'present') {
-                            weeklyData[3 - weekIndex].present++;
-                        } else if (record.status === 'absent') {
-                            weeklyData[3 - weekIndex].absent++;
+                // Process attendance records
+                attendanceRecords.forEach(record => {
+                    try {
+                        const recordDate = new Date(record.date);
+                        
+                        // Only count records from the last 4 weeks
+                        if (recordDate >= fourWeeksAgo && recordDate <= now) {
+                            // Calculate days ago
+                            const daysAgo = Math.floor((now - recordDate) / (24 * 60 * 60 * 1000));
+                            // Calculate which week this record belongs to (0-3)
+                            const weekIndex = Math.min(3, Math.floor(daysAgo / 7));
+                            
+                            console.log(`Record date: ${record.date}, days ago: ${daysAgo}, week index: ${weekIndex}`);
+                            
+                            if (weekIndex >= 0 && weekIndex < 4) {
+                                if (record.status === 'present') {
+                                    weeklyData[weekIndex].present++;
+                                } else if (record.status === 'absent') {
+                                    weeklyData[weekIndex].absent++;
+                                }
+                            }
                         }
+                    } catch (e) {
+                        console.error('Error processing record for month view:', e, record);
                     }
+                });
+            } else if (totalClasses > 0) {
+                // If we have no detailed records but have summary stats
+                console.log('Building month view from summary stats');
+                
+                // Put all the data in the most recent week (week 0)
+                if (presentCount > 0) {
+                    weeklyData[0].present = presentCount;
                 }
-            });
+                if (absentCount > 0) {
+                    weeklyData[0].absent = absentCount;
+                }
+            }
             
-            // Convert to chart data format
+            // Log the weekly data for debugging
+            console.log('Weekly data for chart:', weeklyData);
+            
+            // Convert to chart data format (reverse order to show oldest to newest week)
             weeklyData.forEach(week => {
                 presentData.push(week.present);
                 absentData.push(week.absent);
@@ -432,56 +737,84 @@ function generateChartData(period) {
             const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const now = new Date();
             const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+            
+            // Clear labels array
+            labels = [];
             
             // Create labels for the last 6 months
+            const monthData = [];
             for (let i = 5; i >= 0; i--) {
+                // Calculate the month index (accounting for previous year)
                 const monthIndex = (currentMonth - i + 12) % 12;
-                labels.unshift(monthNames[monthIndex]);
+                // Calculate the year offset if we go to previous year
+                const yearOffset = (currentMonth - i < 0) ? 1 : 0;
+                const year = currentYear - yearOffset;
+                
+                // Add label with month and year
+                labels.push(`${monthNames[monthIndex]} ${year}`);
+                
+                // Add month data entry with month info for later matching
+                monthData.push({
+                    monthIndex: monthIndex,
+                    year: year,
+                    present: 0,
+                    absent: 0
+                });
             }
             
-            // Initialize counters for each month
-            const monthlyData = Array(6).fill().map(() => ({ present: 0, absent: 0 }));
+            console.log('Month slots for semester view:', monthData);
             
-            // Process attendance records
-            attendanceRecords.forEach(record => {
-                const recordDate = new Date(record.date);
-                const recordMonth = recordDate.getMonth();
-                const recordYear = recordDate.getFullYear();
-                const currentYear = now.getFullYear();
+            // Check if we have real attendance records
+            if (attendanceRecords.length > 0) {
+                console.log('Building semester view from attendance records:', attendanceRecords.length);
                 
-                // Calculate months difference
-                let monthsDiff = (currentMonth - recordMonth) + (currentYear - recordYear) * 12;
-                
-                if (monthsDiff >= 0 && monthsDiff < 6) {
-                    if (record.status === 'present') {
-                        monthlyData[5 - monthsDiff].present++;
-                    } else if (record.status === 'absent') {
-                        monthlyData[5 - monthsDiff].absent++;
+                // Process attendance records
+                attendanceRecords.forEach(record => {
+                    try {
+                        const recordDate = new Date(record.date);
+                        const recordMonth = recordDate.getMonth();
+                        const recordYear = recordDate.getFullYear();
+                        
+                        // Find matching month in our data
+                        const matchingMonthIndex = monthData.findIndex(
+                            m => m.monthIndex === recordMonth && m.year === recordYear
+                        );
+                        
+                        if (matchingMonthIndex !== -1) {
+                            console.log(`Found matching month for record ${record.date}: ${matchingMonthIndex}`);
+                            
+                            if (record.status === 'present') {
+                                monthData[matchingMonthIndex].present++;
+                            } else if (record.status === 'absent') {
+                                monthData[matchingMonthIndex].absent++;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error processing record for semester view:', e, record);
                     }
+                });
+            } else if (totalClasses > 0) {
+                // If we have no detailed records but have summary stats
+                console.log('Building semester view from summary stats');
+                
+                // Put all the data in the current month (last index)
+                if (presentCount > 0) {
+                    monthData[monthData.length - 1].present = presentCount;
                 }
-            });
+                if (absentCount > 0) {
+                    monthData[monthData.length - 1].absent = absentCount;
+                }
+            }
             
-            // Convert to chart data format
-            monthlyData.forEach(month => {
+            // Log the monthly data for debugging
+            console.log('Monthly data for chart:', monthData);
+            
+            // Extract data for chart
+            monthData.forEach(month => {
                 presentData.push(month.present);
                 absentData.push(month.absent);
             });
-        }
-    } else {
-        // Fallback to mock data if no real data is available
-        console.warn('No attendance data available, using mock data');
-        if (period === 'week') {
-            labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-            presentData = [1, 1, 0, 1, 0, 0, 0];
-            absentData = [0, 0, 1, 0, 1, 0, 0];
-        } else if (period === 'month') {
-            labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-            presentData = [3, 2, 3, 2];
-            absentData = [1, 2, 1, 2];
-        } else if (period === 'semester') {
-            labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-            presentData = [12, 11, 13, 10, 12, 5];
-            absentData = [2, 3, 1, 4, 2, 1];
         }
     }
     
@@ -496,7 +829,19 @@ function formatDate(dateString) {
 
 // Show alert message
 function showAlert(message, type = 'info') {
-    const alertContainer = document.getElementById('alertContainer');
+    let alertContainer = document.getElementById('alertContainer');
+    
+    // Create the alert container if it doesn't exist
+    if (!alertContainer) {
+        alertContainer = document.createElement('div');
+        alertContainer.id = 'alertContainer';
+        alertContainer.style.position = 'fixed';
+        alertContainer.style.top = '20px';
+        alertContainer.style.right = '20px';
+        alertContainer.style.zIndex = '1050';
+        alertContainer.style.maxWidth = '350px';
+        document.body.appendChild(alertContainer);
+    }
     
     const alert = document.createElement('div');
     alert.className = `alert alert-${type} alert-dismissible fade show`;
@@ -573,16 +918,6 @@ function displaySubjectDetails(subject) {
     // Use our new function to update the attendance circle
     updateAttendanceCircle(attendancePercentage);
     
-    // Update streak
-    const currentStreak = subject.streak?.current || 0;
-    const bestStreak = subject.streak?.best || 0;
-    document.getElementById('currentStreak').textContent = currentStreak;
-    document.getElementById('bestStreak').textContent = bestStreak;
-    
-    // Update streak progress bar percentage
-    const streakProgress = bestStreak > 0 ? (currentStreak / bestStreak) * 100 : 0;
-    document.querySelector('.streak-progress .progress-bar').style.width = `${streakProgress}%`;
-    
     // Initialize attendance chart
     initializeAttendanceChart(subject.attendanceData?.history || []);
 }
@@ -596,83 +931,180 @@ async function syncAttendanceWithDatabase() {
             return false;
         }
         
-        // Get today's date in ISO format (YYYY-MM-DD)
+        console.log('Starting attendance sync for subject:', subjectData.name);
+        
+        // Get today's date in ISO format for logging
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
+        console.log('Today\'s date for comparison:', todayStr);
         
-        // Check if we already have today's attendance in our local data
-        const hasTodayAttendance = subjectData.attendance && 
-            subjectData.attendance.some(record => {
-                const recordDate = new Date(record.date).toISOString().split('T')[0];
-                return recordDate === todayStr;
-            });
-        
-        // If we already have today's attendance, no need to sync
-        if (hasTodayAttendance) {
-            console.log('Today\'s attendance already synced');
-            return false;
-        }
-        
-        // Attempt to get the latest attendance data
-        const response = await fetch(`/api/v1/user/attendance/${subjectData._id}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (!response.ok) {
-            console.warn('Failed to sync attendance:', response.statusText);
-            return false;
-        }
-        
-        const data = await response.json();
-        
-        if (data && data.attendance && Array.isArray(data.attendance)) {
-            // Update our subject data with the new attendance records
-            subjectData.attendance = data.attendance;
-            
-            // Check if we now have today's attendance
-            const updatedTodayAttendance = data.attendance.some(record => {
-                const recordDate = new Date(record.date).toISOString().split('T')[0];
-                return recordDate === todayStr;
-            });
-            
-            if (updatedTodayAttendance) {
-                console.log('Found today\'s attendance in sync');
-                // Refresh the UI to show updated data
-                const totalClasses = (subjectData.totalClass || 0) + 1;
-                const presentCount = (subjectData.totalPresent || 0) + 
-                    (data.attendance.find(r => {
-                        const recordDate = new Date(r.date).toISOString().split('T')[0];
-                        return recordDate === todayStr && r.status === 'present';
-                    }) ? 1 : 0);
-                
-                // Update the UI
-                document.getElementById('totalClasses').textContent = totalClasses;
-                document.getElementById('presentCount').textContent = presentCount;
-                document.getElementById('absentCount').textContent = totalClasses - presentCount;
-                
-                // Update attendance percentage
-                const percentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 0;
-                updateAttendanceCircle(percentage);
-                
-                // Refresh the chart with the current period
-                const activeButton = document.querySelector('.period-selector .btn.active');
-                if (activeButton) {
-                    initializeAttendanceChart(activeButton.dataset.period);
-                } else {
-                    initializeAttendanceChart('week');
+        // First try to get attendance data specifically
+        try {
+            console.log('Fetching attendance data for subject ID:', subjectData._id);
+            const attendanceResponse = await fetch(`/api/v1/user/attendance/${subjectData._id}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
                 }
+            });
+            
+            if (attendanceResponse.ok) {
+                const attendanceData = await attendanceResponse.json();
+                console.log('Raw attendance data from API:', attendanceData);
                 
-                return true;
+                if (attendanceData && attendanceData.attendance && Array.isArray(attendanceData.attendance)) {
+                    // Process the attendance records to fix any timezone issues
+                    const processedAttendance = attendanceData.attendance.map(record => {
+                        // Ensure dates are properly formatted
+                        if (record.date) {
+                            const recordDate = new Date(record.date);
+                            // Convert to ISO format without time for consistency
+                            const formattedDate = recordDate.toISOString().split('T')[0];
+                            return {
+                                ...record,
+                                date: formattedDate // Use consistent date format
+                            };
+                        }
+                        return record;
+                    });
+                    
+                    console.log('Processed attendance records:', processedAttendance);
+                    
+                    // Check if we now have today's attendance after processing
+                    const todayRecord = processedAttendance.find(r => r.date === todayStr);
+                    console.log('Today\'s record after processing:', todayRecord);
+                    
+                    // Update our subject data with processed attendance
+                    subjectData.attendance = processedAttendance;
+                    
+                    // Now continue with the comprehensive sync
+                }
+            } else {
+                console.warn('Failed to get attendance data, status:', attendanceResponse.status);
             }
+        } catch (attendanceError) {
+            console.error('Error fetching attendance data:', attendanceError);
+        }
+        
+        // Continue with the full data sync
+        
+        // Try to get comprehensive subject data
+        try {
+            const response = await fetch(`/api/v1/user/subjects/${subjectData._id}/complete`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.subject) {
+                    // If we get complete data, make sure attendance is processed correctly
+                    if (data.subject.attendance && Array.isArray(data.subject.attendance)) {
+                        // Process the attendance records to fix any timezone issues
+                        data.subject.attendance = data.subject.attendance.map(record => {
+                            // Ensure dates are properly formatted
+                            if (record.date) {
+                                const recordDate = new Date(record.date);
+                                // Convert to ISO format without time for consistency
+                                const formattedDate = recordDate.toISOString().split('T')[0];
+                                return {
+                                    ...record,
+                                    date: formattedDate // Use consistent date format
+                                };
+                            }
+                            return record;
+                        });
+                    }
+                    
+                    // Update our subject data with the complete data
+                    subjectData = data.subject;
+                    console.log('Synced complete subject data with processed dates:', subjectData);
+                    
+                    // Refresh UI components
+                    updateUIFromDatabaseData();
+                    return true;
+                }
+            } else {
+                console.warn('Complete subject endpoint not available, falling back to individual calls');
+            }
+        } catch (error) {
+            console.error('Error syncing complete data:', error);
         }
         
         return false;
     } catch (error) {
         console.error('Error syncing attendance:', error);
         return false;
+    }
+}
+
+// Function to update all UI elements from the database data
+function updateUIFromDatabaseData() {
+    if (!subjectData) return;
+    
+    // Update attendance counts
+    let totalClasses = 0;
+    let presentCount = 0;
+    let absentCount = 0;
+    
+    console.log('Updating UI from database data:', subjectData);
+    
+    // First try to use stats from the API if available
+    if (subjectData.stats) {
+        console.log('Using stats data for UI update:', subjectData.stats);
+        totalClasses = subjectData.stats.totalClasses || 0;
+        presentCount = subjectData.stats.presentCount || 0;
+        absentCount = subjectData.stats.absentCount || 0;
+    } 
+    // Then try to calculate from attendance records
+    else if (subjectData.attendance && Array.isArray(subjectData.attendance)) {
+        console.log('Calculating stats from attendance records:', subjectData.attendance.length);
+        totalClasses = subjectData.attendance.length;
+        presentCount = subjectData.attendance.filter(record => record.status === 'present').length;
+        absentCount = subjectData.attendance.filter(record => record.status === 'absent').length;
+    } 
+    // Finally fall back to basic subject data
+    else {
+        console.log('Using basic subject data for stats');
+        totalClasses = subjectData.totalClass || 0;
+        presentCount = subjectData.totalPresent || 0;
+        absentCount = totalClasses - presentCount;
+    }
+    
+    // Fallback to ensure we show something: if stats are available in the UI already, use them
+    if (totalClasses === 0 && presentCount === 0 && absentCount === 0) {
+        const uiTotalClasses = parseInt(document.getElementById('totalClasses').textContent) || 0;
+        const uiPresentCount = parseInt(document.getElementById('presentCount').textContent) || 0;
+        const uiAbsentCount = parseInt(document.getElementById('absentCount').textContent) || 0;
+        
+        if (uiTotalClasses > 0 || uiPresentCount > 0 || uiAbsentCount > 0) {
+            console.log('Using UI stats as fallback');
+            totalClasses = uiTotalClasses;
+            presentCount = uiPresentCount;
+            absentCount = uiAbsentCount;
+        }
+    }
+    
+    console.log('Final stats for UI:', { totalClasses, presentCount, absentCount });
+    
+    // Update UI
+    document.getElementById('totalClasses').textContent = totalClasses;
+    document.getElementById('presentCount').textContent = presentCount;
+    document.getElementById('absentCount').textContent = absentCount;
+    
+    // Update attendance percentage
+    const percentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 0;
+    updateAttendanceCircle(percentage);
+    
+    // Refresh chart
+    const activeButton = document.querySelector('.period-selector .btn.active');
+    if (activeButton) {
+        initializeAttendanceChart(activeButton.dataset.period);
+    } else {
+        initializeAttendanceChart('week');
     }
 }
