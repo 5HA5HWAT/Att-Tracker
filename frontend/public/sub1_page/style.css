@@ -697,10 +697,13 @@ footer {
 /* Streak Info */
 .streak-info {
   display: flex;
+  flex-direction: column;
   justify-content: center;
-  align-items: center;
-  gap: 2rem;
-  margin: 1rem 0;
+  gap: 1rem;
+  padding: 1rem 0.5rem;
+  margin: 0.5rem 0;
+  background-color: #f8f9fa;
+  border-radius: 8px;
 }
 
 .streak-current, .streak-best {
@@ -708,6 +711,12 @@ footer {
   flex-direction: column;
   align-items: center;
   text-align: center;
+}
+
+.streak-count {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #212529;
 }
 
 .streak-current span, .streak-best span {
@@ -722,7 +731,7 @@ footer {
 }
 
 .streak-progress {
-  margin-top: 1rem;
+  margin-top: 0.5rem;
 }
 
 .streak-progress .progress {
@@ -878,6 +887,21 @@ footer {
 
 .badge-absent:hover {
   background-color: #c82333;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.badge-total {
+  background-color: #6c757d;
+  color: white;
+  font-weight: 500;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.badge-total:hover {
+  background-color: #5a6268;
   transform: translateY(-2px);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }

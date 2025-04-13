@@ -25,7 +25,7 @@
         <!-- Stats Overview -->
         <div class="row mb-4">
             <!-- Attendance Circle -->
-            <div class="col-md-4 mb-3">
+            <div class="col-md-6 mb-3">
                 <div class="card h-100">
                     <div class="card-body text-center d-flex flex-column align-items-center justify-content-center">
                         <h5 class="card-title">Attendance Rate</h5>
@@ -52,34 +52,23 @@
                                 </div>
                                 <div class="col-4">
                                     <div class="stat-box">
-                                        <span class="badge badge-late">Late</span>
-                                        <span id="lateCount" class="stat-value">0</span>
+                                        <span class="badge badge-total">Total</span>
+                                        <span id="totalClasses" class="stat-value">0</span>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="total-classes mt-2">
-                                Total Classes: <span id="totalClasses">0</span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
             
-            <!-- Hours & Streak -->
-            <div class="col-md-4 mb-3">
+            <!-- Streak -->
+            <div class="col-md-6 mb-3">
                 <div class="card h-100">
                     <div class="card-body">
-                        <h5 class="card-title">Hours & Streak</h5>
-                        
-                        <div class="hours-info mb-3">
-                            <div class="info-label">Total Hours</div>
-                            <div class="info-value">
-                                <span id="totalHours">0</span> hrs
-                            </div>
-                        </div>
+                        <h5 class="card-title">Streak</h5>
                         
                         <div class="streak-info">
-                            <h6>Attendance Streak</h6>
                             <div class="d-flex justify-content-between mb-1">
                                 <span>Current</span>
                                 <span>Best</span>
@@ -93,20 +82,6 @@
                                     <div class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Quick Actions -->
-            <div class="col-md-4 mb-3">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h5 class="card-title">Quick Actions</h5>
-                        <div class="d-grid gap-2">
-                            <a href="../daily_activity/index.html" class="btn btn-success">Mark Today's Attendance</a>
-                            <a href="../dashboard/dashboard.html" class="btn btn-outline-primary">View All Subjects</a>
-                            <a href="#" onclick="window.history.back(); return false;" class="btn btn-outline-secondary">Go Back</a>
                         </div>
                     </div>
                 </div>
@@ -128,31 +103,6 @@
                         </div>
                         <div class="chart-container">
                             <canvas id="attendanceChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Recent Activity -->
-        <div class="row">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Recent Activity</h5>
-                        <div class="table-responsive">
-                            <table class="table table-hover" id="recentActivityTable">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Status</th>
-                                        <th>Notes</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Activity rows will be populated by JavaScript -->
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>

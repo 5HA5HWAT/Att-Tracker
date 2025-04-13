@@ -64,7 +64,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Initialize components
             initializeCircularProgress();
             initializeAttendanceChart('week');
-            loadRecentActivities();
+            
+            // Sync with database to check for any new attendance records
+            await syncAttendanceWithDatabase();
             
             // Set up event listeners
             document.querySelectorAll('.period-selector .btn').forEach(button => {
@@ -130,6 +132,32 @@ async function fetchSubjectData() {
             } else if (subjectName) {
                 subjectDataResult = data.subjects.find(s => s.name === subjectName);
             }
+            
+            // If we found the subject, fetch its attendance records
+            if (subjectDataResult) {
+                try {
+                    const attendanceResponse = await fetch(`/api/v1/user/attendance/${subjectDataResult._id}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    if (attendanceResponse.ok) {
+                        const attendanceData = await attendanceResponse.json();
+                        if (attendanceData && attendanceData.attendance) {
+                            // Add attendance records to the subject data
+                            subjectDataResult.attendance = attendanceData.attendance;
+                            console.log('Fetched attendance data:', attendanceData.attendance);
+                        }
+                    } else {
+                        console.warn('Failed to fetch attendance records');
+                    }
+                } catch (attendanceError) {
+                    console.error('Error fetching attendance:', attendanceError);
+                }
+            }
         } catch (apiError) {
             console.error('API Error:', apiError);
             // Continue to fallback methods
@@ -170,15 +198,10 @@ async function fetchSubjectData() {
         const totalClasses = subjectData.totalClass || 0;
         const presentCount = subjectData.totalPresent || 0;
         const absentCount = totalClasses - presentCount;
-        const lateCount = 0; // Not tracking late status currently
         
         document.getElementById('totalClasses').textContent = totalClasses;
         document.getElementById('presentCount').textContent = presentCount;
         document.getElementById('absentCount').textContent = absentCount;
-        document.getElementById('lateCount').textContent = lateCount;
-        
-        // Update hours (assuming 1 class = 1 hour)
-        document.getElementById('totalHours').textContent = presentCount;
         
         // For now, set streak to 0 as it's not being tracked yet
         document.getElementById('currentStreak').textContent = 0;
@@ -253,7 +276,7 @@ function initializeAttendanceChart(period) {
     }
     
     // Generate data based on selected period
-    const { labels, presentData, absentData, lateData } = generateChartData(period);
+    const { labels, presentData, absentData } = generateChartData(period);
     
     // Create chart
     attendanceChart = new Chart(ctx, {
@@ -273,13 +296,6 @@ function initializeAttendanceChart(period) {
                     data: absentData,
                     backgroundColor: '#dc3545',
                     borderColor: '#dc3545',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Late',
-                    data: lateData,
-                    backgroundColor: '#ffc107',
-                    borderColor: '#ffc107',
                     borderWidth: 1
                 }
             ]
@@ -317,126 +333,159 @@ function initializeAttendanceChart(period) {
 
 // Generate chart data based on period
 function generateChartData(period) {
-    // This would normally come from API, using mock data for now
+    // Default empty datasets
     let labels = [];
     let presentData = [];
     let absentData = [];
-    let lateData = [];
     
-    if (period === 'week') {
-        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        presentData = [1, 1, 0, 1, 0, 0, 0];
-        absentData = [0, 0, 1, 0, 1, 0, 0];
-        lateData = [0, 0, 0, 0, 0, 0, 0];
-    } else if (period === 'month') {
-        // Generate last 4 weeks
-        labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-        presentData = [3, 2, 3, 2];
-        absentData = [1, 2, 1, 2];
-        lateData = [0, 0, 1, 0];
-    } else if (period === 'semester') {
-        // Generate months
-        labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        presentData = [12, 11, 13, 10, 12, 5];
-        absentData = [2, 3, 1, 4, 2, 1];
-        lateData = [1, 1, 0, 0, 1, 0];
-    }
-    
-    return { labels, presentData, absentData, lateData };
-}
-
-// Load recent activities
-function loadRecentActivities(activities = []) {
-    const tableBody = document.querySelector('#recentActivityTable tbody');
-    tableBody.innerHTML = '';
-    
-    if (!activities || activities.length === 0) {
-        // Use mock data if no activities provided
-        activities = getMockActivities();
-    }
-    
-    if (activities.length === 0) {
-        // Display empty state
-        const emptyRow = document.createElement('tr');
-        emptyRow.innerHTML = `
-            <td colspan="3" class="text-center">
-                <div class="empty-state">
-                    <i class="fa fa-calendar-times"></i>
-                    <p>No activity records found for this subject yet. Activities will appear here as you mark your attendance.</p>
-                </div>
-            </td>
-        `;
-        tableBody.appendChild(emptyRow);
-        return;
-    }
-    
-    // Sort activities by date, most recent first
-    activities.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-    // Add activities to table
-    activities.forEach(activity => {
-        const row = document.createElement('tr');
+    // Get actual dates and attendance from subject data if available
+    if (subjectData && subjectData.attendance && Array.isArray(subjectData.attendance)) {
+        const attendanceRecords = subjectData.attendance;
         
-        // Format date
-        const formattedDate = formatDate(activity.date);
-        
-        // Determine badge class based on status
-        let badgeClass = '';
-        switch(activity.status.toLowerCase()) {
-            case 'present':
-                badgeClass = 'badge-present';
-                break;
-            case 'absent':
-                badgeClass = 'badge-absent';
-                break;
-            case 'late':
-                badgeClass = 'badge-late';
-                break;
-            default:
-                badgeClass = 'badge-secondary';
+        if (period === 'week') {
+            // Generate current week days (Monday to Sunday)
+            const today = new Date();
+            const currentDay = today.getDay(); // 0 (Sunday) to 6 (Saturday)
+            const startDate = new Date(today);
+            // Adjust to previous Monday (or today if it's Monday)
+            startDate.setDate(today.getDate() - (currentDay === 0 ? 6 : currentDay - 1));
+            
+            // Generate the 7 days of the week
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(startDate);
+                date.setDate(startDate.getDate() + i);
+                
+                // Format date as short day name (Mon, Tue, etc.)
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                labels.push(dayName);
+                
+                // Format date as ISO string to match with records
+                const dateStr = date.toISOString().split('T')[0];
+                
+                // Look for attendance record for this date
+                const record = attendanceRecords.find(r => {
+                    const recordDate = new Date(r.date).toISOString().split('T')[0];
+                    return recordDate === dateStr;
+                });
+                
+                // Set attendance status
+                if (record) {
+                    if (record.status === 'present') {
+                        presentData.push(1);
+                        absentData.push(0);
+                    } else if (record.status === 'absent') {
+                        presentData.push(0);
+                        absentData.push(1);
+                    } else {
+                        presentData.push(0);
+                        absentData.push(0);
+                    }
+                } else {
+                    // No record for this date
+                    presentData.push(0);
+                    absentData.push(0);
+                }
+            }
+        } else if (period === 'month') {
+            // Generate last 4 weeks
+            labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+            
+            // Group attendance by week
+            const now = new Date();
+            const fourWeeksAgo = new Date(now);
+            fourWeeksAgo.setDate(now.getDate() - 28);
+            
+            // Initialize counters for each week
+            const weeklyData = [
+                { present: 0, absent: 0 },
+                { present: 0, absent: 0 },
+                { present: 0, absent: 0 },
+                { present: 0, absent: 0 }
+            ];
+            
+            // Process attendance records
+            attendanceRecords.forEach(record => {
+                const recordDate = new Date(record.date);
+                
+                // Only count records from the last 4 weeks
+                if (recordDate >= fourWeeksAgo) {
+                    // Calculate which week this record belongs to (0-3)
+                    const weekIndex = Math.floor((now - recordDate) / (7 * 24 * 60 * 60 * 1000));
+                    
+                    if (weekIndex >= 0 && weekIndex < 4) {
+                        if (record.status === 'present') {
+                            weeklyData[3 - weekIndex].present++;
+                        } else if (record.status === 'absent') {
+                            weeklyData[3 - weekIndex].absent++;
+                        }
+                    }
+                }
+            });
+            
+            // Convert to chart data format
+            weeklyData.forEach(week => {
+                presentData.push(week.present);
+                absentData.push(week.absent);
+            });
+        } else if (period === 'semester') {
+            // Get the last 6 months
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            
+            // Create labels for the last 6 months
+            for (let i = 5; i >= 0; i--) {
+                const monthIndex = (currentMonth - i + 12) % 12;
+                labels.unshift(monthNames[monthIndex]);
+            }
+            
+            // Initialize counters for each month
+            const monthlyData = Array(6).fill().map(() => ({ present: 0, absent: 0 }));
+            
+            // Process attendance records
+            attendanceRecords.forEach(record => {
+                const recordDate = new Date(record.date);
+                const recordMonth = recordDate.getMonth();
+                const recordYear = recordDate.getFullYear();
+                const currentYear = now.getFullYear();
+                
+                // Calculate months difference
+                let monthsDiff = (currentMonth - recordMonth) + (currentYear - recordYear) * 12;
+                
+                if (monthsDiff >= 0 && monthsDiff < 6) {
+                    if (record.status === 'present') {
+                        monthlyData[5 - monthsDiff].present++;
+                    } else if (record.status === 'absent') {
+                        monthlyData[5 - monthsDiff].absent++;
+                    }
+                }
+            });
+            
+            // Convert to chart data format
+            monthlyData.forEach(month => {
+                presentData.push(month.present);
+                absentData.push(month.absent);
+            });
         }
-        
-        row.innerHTML = `
-            <td class="activity-date">${formattedDate}</td>
-            <td><span class="badge ${badgeClass}">${activity.status}</span></td>
-            <td class="activity-notes">${activity.notes || '-'}</td>
-        `;
-        
-        tableBody.appendChild(row);
-    });
-}
-
-// Get mock activities for demonstration
-function getMockActivities() {
-    const today = new Date();
-    
-    return [
-        {
-            date: new Date(today.getTime() - (86400000 * 0)),
-            status: 'Present',
-            notes: 'On time for class'
-        },
-        {
-            date: new Date(today.getTime() - (86400000 * 2)),
-            status: 'Late',
-            notes: 'Arrived 10 minutes late'
-        },
-        {
-            date: new Date(today.getTime() - (86400000 * 4)),
-            status: 'Present',
-            notes: 'Participated actively in class discussion'
-        },
-        {
-            date: new Date(today.getTime() - (86400000 * 7)),
-            status: 'Absent',
-            notes: 'Sick leave'
-        },
-        {
-            date: new Date(today.getTime() - (86400000 * 9)),
-            status: 'Present',
-            notes: 'Completed all exercises'
+    } else {
+        // Fallback to mock data if no real data is available
+        console.warn('No attendance data available, using mock data');
+        if (period === 'week') {
+            labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            presentData = [1, 1, 0, 1, 0, 0, 0];
+            absentData = [0, 0, 1, 0, 1, 0, 0];
+        } else if (period === 'month') {
+            labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+            presentData = [3, 2, 3, 2];
+            absentData = [1, 2, 1, 2];
+        } else if (period === 'semester') {
+            labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+            presentData = [12, 11, 13, 10, 12, 5];
+            absentData = [2, 3, 1, 4, 2, 1];
         }
-    ];
+    }
+    
+    return { labels, presentData, absentData };
 }
 
 // Format date
@@ -508,18 +557,12 @@ function displaySubjectDetails(subject) {
     // Calculate attendance stats
     const presentCount = subject.attendanceData?.presentCount || 0;
     const absentCount = subject.attendanceData?.absentCount || 0;
-    const lateCount = subject.attendanceData?.lateCount || 0;
-    const totalClasses = presentCount + absentCount + lateCount;
+    const totalClasses = presentCount + absentCount;
     
     // Display attendance counts
     document.getElementById('presentCount').textContent = presentCount;
     document.getElementById('absentCount').textContent = absentCount;
-    document.getElementById('lateCount').textContent = lateCount;
     document.getElementById('totalClasses').textContent = totalClasses;
-    
-    // Calculate total hours
-    const totalHours = subject.totalHours || 0;
-    document.getElementById('totalHours').textContent = totalHours;
     
     // Calculate and display attendance percentage
     let attendancePercentage = 0;
@@ -542,7 +585,94 @@ function displaySubjectDetails(subject) {
     
     // Initialize attendance chart
     initializeAttendanceChart(subject.attendanceData?.history || []);
-    
-    // Load recent activities
-    loadRecentActivities(subject.activities || []);
+}
+
+// Sync with database - check if the database has new attendance records
+async function syncAttendanceWithDatabase() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token || !subjectData || !subjectData._id) {
+            console.warn('Cannot sync attendance: Missing token or subject ID');
+            return false;
+        }
+        
+        // Get today's date in ISO format (YYYY-MM-DD)
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // Check if we already have today's attendance in our local data
+        const hasTodayAttendance = subjectData.attendance && 
+            subjectData.attendance.some(record => {
+                const recordDate = new Date(record.date).toISOString().split('T')[0];
+                return recordDate === todayStr;
+            });
+        
+        // If we already have today's attendance, no need to sync
+        if (hasTodayAttendance) {
+            console.log('Today\'s attendance already synced');
+            return false;
+        }
+        
+        // Attempt to get the latest attendance data
+        const response = await fetch(`/api/v1/user/attendance/${subjectData._id}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            console.warn('Failed to sync attendance:', response.statusText);
+            return false;
+        }
+        
+        const data = await response.json();
+        
+        if (data && data.attendance && Array.isArray(data.attendance)) {
+            // Update our subject data with the new attendance records
+            subjectData.attendance = data.attendance;
+            
+            // Check if we now have today's attendance
+            const updatedTodayAttendance = data.attendance.some(record => {
+                const recordDate = new Date(record.date).toISOString().split('T')[0];
+                return recordDate === todayStr;
+            });
+            
+            if (updatedTodayAttendance) {
+                console.log('Found today\'s attendance in sync');
+                // Refresh the UI to show updated data
+                const totalClasses = (subjectData.totalClass || 0) + 1;
+                const presentCount = (subjectData.totalPresent || 0) + 
+                    (data.attendance.find(r => {
+                        const recordDate = new Date(r.date).toISOString().split('T')[0];
+                        return recordDate === todayStr && r.status === 'present';
+                    }) ? 1 : 0);
+                
+                // Update the UI
+                document.getElementById('totalClasses').textContent = totalClasses;
+                document.getElementById('presentCount').textContent = presentCount;
+                document.getElementById('absentCount').textContent = totalClasses - presentCount;
+                
+                // Update attendance percentage
+                const percentage = totalClasses > 0 ? Math.round((presentCount / totalClasses) * 100) : 0;
+                updateAttendanceCircle(percentage);
+                
+                // Refresh the chart with the current period
+                const activeButton = document.querySelector('.period-selector .btn.active');
+                if (activeButton) {
+                    initializeAttendanceChart(activeButton.dataset.period);
+                } else {
+                    initializeAttendanceChart('week');
+                }
+                
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Error syncing attendance:', error);
+        return false;
+    }
 }
